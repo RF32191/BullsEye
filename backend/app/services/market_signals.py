@@ -69,6 +69,69 @@ class MarketSignalsService:
             "data_sources": self._sources(),
         }
 
+    async def bundle_lite(
+        self,
+        ticker: str,
+        *,
+        snapshot: dict | None = None,
+        technicals: dict | None = None,
+    ) -> dict:
+        """Lightweight signals for predictions — avoids duplicate Yahoo peer/intraday calls."""
+        symbol = ticker.upper()
+        technicals = technicals or {}
+        quote = (snapshot or {}).get("quote") or {}
+
+        short_pct = 0.0
+        grade_bias = "neutral"
+        inst_change = None
+        cluster_buys = 0
+        sector_rs = technicals.get("trend_pct_30d")
+        intraday: dict = {"available": False}
+        insider_stats: dict = {}
+
+        if self.fmp.available:
+            try:
+                float_data = await self.fmp.shares_float(symbol)
+                short_pct = float(float_data.get("shortPercentOfFloat") or float_data.get("shortPercent") or 0)
+            except Exception:
+                pass
+            try:
+                grades = await self.fmp.analyst_grades(symbol)
+                grade_bias = self._grade_bias(grades)
+            except Exception:
+                pass
+            try:
+                institutions = await self.fmp.institutional_holders(symbol)
+                inst_change = self._institutional_change(institutions)
+            except Exception:
+                pass
+            try:
+                insider_stats = await self.fmp.insider_statistics(symbol)
+            except Exception:
+                pass
+
+        components = self._score_signals(
+            short_pct=short_pct,
+            grade_bias=grade_bias,
+            inst_change=inst_change,
+            cluster_buys=cluster_buys,
+            sector_rs=sector_rs,
+            intraday=intraday,
+            insider_stats=insider_stats,
+        )
+
+        return {
+            "ticker": symbol,
+            "short_interest_pct": round(short_pct, 2) if short_pct else None,
+            "analyst_grade_bias": grade_bias,
+            "institutional_net_change_pct": inst_change,
+            "insider_cluster_buys": cluster_buys,
+            "sector_relative_strength_pct": sector_rs,
+            "signal_components": components,
+            "data_sources": self._sources(),
+            "lite_mode": True,
+        }
+
     async def _sector_relative_strength(
         self, symbol: str, technicals: dict, peers: list[str]
     ) -> float | None:

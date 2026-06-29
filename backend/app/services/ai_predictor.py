@@ -1,6 +1,7 @@
 import json
+import time
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 from app.config import settings
 
@@ -83,18 +84,39 @@ Rules:
 - Every claim must reference data from the snapshot
 """
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are a quantitative equity analyst. Output valid JSON only."},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": "stock_prediction", "schema": PREDICTION_SCHEMA, "strict": True},
-            },
-            temperature=0.2,
-        )
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are a quantitative equity analyst. Output valid JSON only."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {"name": "stock_prediction", "schema": PREDICTION_SCHEMA, "strict": True},
+                    },
+                    temperature=0.2,
+                )
+                content = response.choices[0].message.content
+                return json.loads(content)
+            except RateLimitError as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise ValueError(
+                    "OpenAI rate limit reached. Wait a minute and try again, or use the free Technical bot."
+                ) from exc
+            except Exception as exc:
+                err = str(exc).lower()
+                if "rate limit" in err or "429" in err:
+                    raise ValueError(
+                        "OpenAI rate limit reached. Wait a minute and try again, or use the free Technical bot."
+                    ) from exc
+                raise
 
-        content = response.choices[0].message.content
-        return json.loads(content)
+        if last_error:
+            raise last_error
+        raise ValueError("AI prediction failed")

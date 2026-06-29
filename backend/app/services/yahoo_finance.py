@@ -13,7 +13,8 @@ from yfinance import Search
 
 _USER_AGENT = "Mozilla/5.0 (compatible; BullseyeAI/1.0)"
 _CACHE: dict[str, tuple[float, dict]] = {}
-_CACHE_TTL_SECONDS = 120
+_CACHE_TTL_SECONDS = 300
+_STALE_CACHE_TTL_SECONDS = 1800
 
 
 class YahooFinanceClient:
@@ -33,6 +34,13 @@ class YahooFinanceClient:
     def _cache_get(key: str) -> dict | None:
         entry = _CACHE.get(key)
         if entry and time.time() - entry[0] < _CACHE_TTL_SECONDS:
+            return entry[1]
+        return None
+
+    @staticmethod
+    def _cache_get_stale(key: str) -> dict | None:
+        entry = _CACHE.get(key)
+        if entry and time.time() - entry[0] < _STALE_CACHE_TTL_SECONDS:
             return entry[1]
         return None
 
@@ -278,7 +286,12 @@ class YahooFinanceClient:
             if result:
                 return self._cache_set(cache_key, result)
         except Exception:
-            pass
+            stale = self._cache_get_stale(cache_key)
+            if stale and stale.get("price"):
+                out = dict(stale)
+                out["is_stale"] = True
+                out["price_note"] = "Cached price — Yahoo Finance rate limit. Retry in a few minutes."
+                return out
 
         # yfinance fallback
         ticker = yf.Ticker(symbol)
@@ -304,6 +317,12 @@ class YahooFinanceClient:
                 if not math.isnan(float(close)):
                     price = float(close)
         if price is None:
+            stale = self._cache_get_stale(cache_key)
+            if stale and stale.get("price"):
+                out = dict(stale)
+                out["is_stale"] = True
+                out["price_note"] = "Cached price — Yahoo Finance rate limit. Retry in a few minutes."
+                return out
             raise ValueError(f"No Yahoo Finance data for {symbol}")
 
         price = float(price)
@@ -344,12 +363,17 @@ class YahooFinanceClient:
             self._cache_set(cache_key, {"rows": rows})
             return rows
         except Exception:
-            pass
+            stale = self._cache_get_stale(cache_key)
+            if stale and stale.get("rows"):
+                return stale["rows"]
 
         ticker = yf.Ticker(symbol)
         period = "1y" if days > 180 else "6mo" if days > 90 else "3mo"
         hist = ticker.history(period=period, auto_adjust=True)
         if hist.empty:
+            stale = self._cache_get_stale(cache_key)
+            if stale and stale.get("rows"):
+                return stale["rows"]
             raise ValueError(f"No price history for {symbol}")
 
         rows = []
@@ -368,6 +392,9 @@ class YahooFinanceClient:
                 }
             )
         if not rows:
+            stale = self._cache_get_stale(cache_key)
+            if stale and stale.get("rows"):
+                return stale["rows"]
             raise ValueError(f"No valid price history for {symbol}")
         self._cache_set(cache_key, {"rows": rows})
         return rows

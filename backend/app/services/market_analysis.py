@@ -16,10 +16,21 @@ class MarketAnalysisService:
     def __init__(self):
         self.market = MarketDataService()
 
-    async def get_technicals(self, ticker: str) -> dict:
+    async def get_technicals(
+        self,
+        ticker: str,
+        *,
+        quote: dict | None = None,
+        history: list[dict] | None = None,
+    ) -> dict:
         symbol = ticker.upper()
-        quote = await self.market.quote(symbol)
-        history = await self.market.historical_prices(symbol, days=120)
+        if quote is None:
+            quote = await self.market.quote(symbol)
+        if history is None:
+            history = await self.market.historical_prices(symbol, days=120)
+        return self._technicals_from_bars(symbol, quote, history)
+
+    def _technicals_from_bars(self, symbol: str, quote: dict, history: list[dict]) -> dict:
         closes = [float(h.get("close", 0)) for h in history if h.get("close")]
         if not closes:
             price = float(quote.get("price", 0))

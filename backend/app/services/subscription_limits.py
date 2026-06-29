@@ -27,7 +27,8 @@ def tier_of(user: User) -> str:
     return (user.subscription_tier or "free").lower()
 
 
-def require_ai_quota(db: Session, user: User) -> None:
+def check_ai_quota(user: User) -> None:
+    """Verify daily AI allowance without consuming a slot."""
     _reset_usage_if_needed(user)
     if tier_of(user) in ("pro", "elite"):
         return
@@ -36,8 +37,21 @@ def require_ai_quota(db: Session, user: User) -> None:
             status_code=402,
             detail=f"Free tier limit: {FREE_DAILY_AI} AI analyses per day. Upgrade to Pro for unlimited.",
         )
+
+
+def record_ai_usage(db: Session, user: User) -> None:
+    """Consume one AI analysis after a successful run."""
+    _reset_usage_if_needed(user)
+    if tier_of(user) in ("pro", "elite"):
+        return
     user.daily_ai_count += 1
     db.flush()
+
+
+def require_ai_quota(db: Session, user: User) -> None:
+    """Back-compat: check + consume (prefer check_ai_quota + record_ai_usage)."""
+    check_ai_quota(user)
+    record_ai_usage(db, user)
 
 
 def require_chat_quota(db: Session, user: User) -> None:

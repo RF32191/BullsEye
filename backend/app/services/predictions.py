@@ -55,10 +55,15 @@ class PredictionService:
             raise ValueError("Insufficient tokens for AI prediction")
 
         snapshot = await self.market.build_analysis_snapshot(ticker)
-        technicals = await self.analysis.get_technicals(ticker)
+        history = await self.market.historical_prices(ticker, days=120)
+        technicals = await self.analysis.get_technicals(
+            ticker, quote=snapshot.get("quote", {}), history=history
+        )
         snapshot["technicals"] = technicals
         try:
-            signal_bundle = await self.signals.bundle(ticker)
+            signal_bundle = await self.signals.bundle_lite(
+                ticker, snapshot=snapshot, technicals=technicals
+            )
             snapshot["enhanced_signals"] = signal_bundle
         except Exception:
             signal_bundle = {"signal_components": []}
@@ -146,13 +151,19 @@ class PredictionService:
             raise ValueError("Insufficient tokens for technical prediction")
 
         symbol = ticker.upper()
-        technicals = await self.analysis.get_technicals(symbol)
+        snapshot = await self.market.build_analysis_snapshot(symbol)
+        history = await self.market.historical_prices(symbol, days=120)
+        technicals = await self.analysis.get_technicals(
+            symbol, quote=snapshot.get("quote", {}), history=history
+        )
         try:
-            signal_bundle = await self.signals.bundle(symbol)
+            signal_bundle = await self.signals.bundle_lite(
+                symbol, snapshot=snapshot, technicals=technicals
+            )
         except Exception:
             signal_bundle = {"signal_components": []}
 
-        quote = await self.market.quote(symbol)
+        quote = snapshot.get("quote") or await self.market.quote(symbol)
         company_name = quote.get("name", f"{symbol} Inc.")
         price = float(technicals["price"])
 
@@ -186,7 +197,6 @@ class PredictionService:
         bull_case = f"Momentum and moving averages support {technicals['signal']} bias over {horizon_label}."
         bear_case = "Macro shocks or earnings surprises can override technical signals quickly."
 
-        snapshot = await self.market.build_analysis_snapshot(symbol)
         snapshot["technicals"] = technicals
         snapshot["enhanced_signals"] = signal_bundle
         snapshot["horizon_minutes"] = horizon_minutes

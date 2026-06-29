@@ -24,7 +24,8 @@ from app.schemas import (
 from app.services.prediction_accuracy import PredictionAccuracyService
 from app.services.prediction_serializer import prediction_to_response
 from app.services.predictions import PredictionService, TrackerService
-from app.services.subscription_limits import require_ai_quota, usage_snapshot
+from app.services.subscription_limits import check_ai_quota, record_ai_usage, usage_snapshot
+from app.services.prediction_errors import friendly_prediction_error
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 prediction_service = PredictionService()
@@ -39,14 +40,23 @@ async def analyze_stock(
     user: User = Depends(get_current_user),
 ):
     try:
-        require_ai_quota(db, user)
+        check_ai_quota(user)
         prediction = await prediction_service.create_prediction(
             db, user, body.ticker, body.horizon_days, body.horizon_value, body.horizon_unit
         )
+        record_ai_usage(db, user)
+        db.commit()
     except ValueError as exc:
-        raise HTTPException(status_code=402, detail=str(exc)) from exc
+        db.rollback()
+        status, detail = friendly_prediction_error(exc)
+        raise HTTPException(status_code=status, detail=detail) from exc
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {exc}") from exc
+        db.rollback()
+        status, detail = friendly_prediction_error(exc)
+        raise HTTPException(status_code=status, detail=detail) from exc
 
     return prediction_to_response(prediction)
 
