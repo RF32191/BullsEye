@@ -1,0 +1,29 @@
+# Xcode
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Python / backend
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/.env
+backend/.pytest_cache/
+backend/.mypy_cache/
+
+# Secrets
+.env
+.env.local
+*.pem
+
+# Cursor
+.cursor/

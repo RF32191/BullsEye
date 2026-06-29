@@ -2,8 +2,6 @@
 //  BullseyeApp.swift
 //  Bullseye
 //
-//  Created by Ryan Joshua Fermoselle on 6/27/26.
-//
 
 import SwiftUI
 
@@ -12,6 +10,12 @@ struct BullseyeApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .preferredColorScheme(.dark)
+                .task {
+                    await AppSession.shared.bootstrapIfNeeded()
+                    await TradeAlertManager.shared.requestPermissionIfNeeded()
+                    TradeAlertManager.shared.startPolling()
+                }
         }
     }
 }
