@@ -37,9 +37,17 @@ class AIPredictor:
         self.model = settings.openai_model
 
     async def predict(
-        self, ticker: str, horizon_days: int, market_snapshot: dict, *, horizon_label: str | None = None
+        self,
+        ticker: str,
+        horizon_days: int,
+        market_snapshot: dict,
+        *,
+        horizon_label: str | None = None,
+        learning_context: dict | None = None,
     ) -> dict:
         label = horizon_label or f"{horizon_days} days"
+        learning = learning_context or {}
+        learning_text = "\n".join(f"- {line}" for line in learning.get("summary_lines", []))
         if settings.mock_mode or not self.client:
             price = float(market_snapshot.get("quote", {}).get("price", 100))
             return {
@@ -61,13 +69,17 @@ Analyze {ticker.upper()} for a {label} horizon using ONLY the market data below.
 Return a directional prediction with explainable bull and bear cases.
 Cite specific data points from the snapshot in your reasoning.
 
-MARKET DATA (Yahoo Finance + technicals):
+PLATFORM LEARNING (all users, resolved predictions — use to calibrate confidence, not override data):
+{learning_text}
+
+MARKET DATA (Yahoo Finance + technicals + enhanced signals):
 {json.dumps(market_snapshot, indent=2, default=str)}
 
 Rules:
 - direction must be bullish, bearish, or neutral
-- confidence is 0-100
-- target_price, stop_loss, take_profit must be realistic vs current price
+- confidence is 0-100; be conservative when platform history underperforms at this horizon
+- if enhanced signals contradict your direction, lower confidence by 10-20 points
+- target_price, stop_loss, take_profit must be realistic vs current price for {label}
 - Every claim must reference data from the snapshot
 """
 
@@ -81,7 +93,7 @@ Rules:
                 "type": "json_schema",
                 "json_schema": {"name": "stock_prediction", "schema": PREDICTION_SCHEMA, "strict": True},
             },
-            temperature=0.3,
+            temperature=0.2,
         )
 
         content = response.choices[0].message.content

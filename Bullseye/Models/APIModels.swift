@@ -373,6 +373,25 @@ struct EventTrader: Codable, Identifiable, Sendable {
     let proxyWallet: String?
     let verified: Bool?
     let xUsername: String?
+    let isActive: Bool?
+    let recentLiveTrade: TraderLiveTrade?
+}
+
+struct TraderLiveTrade: Codable, Sendable {
+    let title: String
+    let side: String?
+    let sizeUsd: Double?
+    let timestamp: Int?
+}
+
+struct TraderStrategy: Codable, Sendable {
+    let specialty: String?
+    let styleLabel: String?
+    let focusCategories: [String]?
+    let yesBiasPct: Double?
+    let avgBetUsd: Double?
+    let winRatePct: Double?
+    let summary: String?
 }
 
 struct EventTraderDetail: Codable, Sendable {
@@ -389,6 +408,19 @@ struct EventTraderDetail: Codable, Sendable {
     let verified: Bool?
     let recentActivity: [TraderActivityItem]
     let closedPositions: [TraderClosedPosition]
+    let liveTrades: [TraderLiveTradeItem]?
+    let strategy: TraderStrategy?
+    let isActive: Bool?
+}
+
+struct TraderLiveTradeItem: Codable, Identifiable, Sendable {
+    var id: String { (title) + String(timestamp ?? 0) }
+    let type: String?
+    let title: String
+    let side: String?
+    let sizeUsd: Double?
+    let timestamp: Int?
+    let isLive: Bool?
 }
 
 struct TraderActivityItem: Codable, Sendable {

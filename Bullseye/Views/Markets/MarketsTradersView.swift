@@ -21,7 +21,7 @@ struct MarketsTradersView: View {
                         .font(.title2.bold())
                         .foregroundStyle(platform.textPrimary)
                     Text(platform == .polymarket
-                         ? "Live Polymarket leaderboard by P/L and volume. Tap for trade history."
+                         ? "Live leaderboard with win rates, live trades, and derived strategies."
                          : "Notable Kalshi traders and market specialists.")
                         .font(.caption)
                         .foregroundStyle(platform.textSecondary)
@@ -47,6 +47,15 @@ struct MarketsTradersView: View {
         .task { await load() }
     }
 
+    private var liveDot: some View {
+        HStack(spacing: 3) {
+            Circle().fill(Color.green).frame(width: 6, height: 6)
+            Text("LIVE")
+                .font(.caption2.bold())
+                .foregroundStyle(Color.green)
+        }
+    }
+
     private func traderRow(_ trader: EventTrader) -> some View {
         HStack(spacing: 14) {
             Text("#\(trader.rank)")
@@ -63,11 +72,20 @@ struct MarketsTradersView: View {
                             .font(.caption2)
                             .foregroundStyle(platform.accent)
                     }
+                    if trader.isActive == true {
+                        liveDot
+                    }
                 }
                 Text(trader.specialty)
                     .font(.caption2)
                     .foregroundStyle(platform.textTertiary)
                     .lineLimit(1)
+                if let live = trader.recentLiveTrade, !live.title.isEmpty {
+                    Text("Live: \(live.side ?? "TRADE") · \(live.title)")
+                        .font(.caption2)
+                        .foregroundStyle(platform.accentMuted)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {

@@ -16,15 +16,18 @@ _tracker = TrackerService()
 _asset_predictions = AssetMarketPredictionService()
 
 
-async def _hourly_resolve_loop():
+async def _resolution_loop():
+    """Check due predictions every 15 minutes (supports 15m/30m/1h horizons)."""
     while True:
-        await asyncio.sleep(3600)
+        await asyncio.sleep(900)
         db = SessionLocal()
         try:
-            await _tracker.resolve_due_predictions(db)
-            await _asset_predictions.resolve_due(db)
-        except Exception:
-            pass
+            count = await _tracker.resolve_due_predictions(db)
+            asset_count = await _asset_predictions.resolve_due(db)
+            if count or asset_count:
+                print(f"[resolve] stocks={count} assets={asset_count}")
+        except Exception as exc:
+            print(f"[resolve] error: {exc}")
         finally:
             db.close()
 
@@ -32,7 +35,7 @@ async def _hourly_resolve_loop():
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    task = asyncio.create_task(_hourly_resolve_loop())
+    task = asyncio.create_task(_resolution_loop())
     yield
     task.cancel()
     try:

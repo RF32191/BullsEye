@@ -11,6 +11,8 @@ from app.services.market_analysis import MarketAnalysisService
 from app.services.market_data import MarketDataService
 from app.services.tokens import charge_tokens
 from app.services.horizon import horizon_move_pct, resolve_horizon
+from app.services.aggregate_learning import AggregateLearningService
+from app.services.market_signals import MarketSignalsService
 from app.config import settings
 
 
@@ -31,6 +33,8 @@ class PredictionService:
         self.market = MarketDataService()
         self.analysis = MarketAnalysisService()
         self.ai = AIPredictor()
+        self.signals = MarketSignalsService()
+        self.learning = AggregateLearningService()
 
     async def create_prediction(
         self,
@@ -53,9 +57,33 @@ class PredictionService:
         snapshot = await self.market.build_analysis_snapshot(ticker)
         technicals = await self.analysis.get_technicals(ticker)
         snapshot["technicals"] = technicals
+        try:
+            signal_bundle = await self.signals.bundle(ticker)
+            snapshot["enhanced_signals"] = signal_bundle
+        except Exception:
+            signal_bundle = {"signal_components": []}
+            snapshot["enhanced_signals"] = signal_bundle
         snapshot["horizon_minutes"] = horizon_minutes
         snapshot["horizon_label"] = horizon_label
-        ai_result = await self.ai.predict(ticker, ledger_days, snapshot, horizon_label=horizon_label)
+
+        learning_ctx = self.learning.build_learning_context(
+            db, ticker=ticker, horizon_label=horizon_label, engine="ai"
+        )
+        snapshot["platform_learning"] = learning_ctx
+
+        ai_result = await self.ai.predict(
+            ticker, ledger_days, snapshot, horizon_label=horizon_label, learning_context=learning_ctx
+        )
+
+        signal_net = sum(c.get("score", 0) for c in signal_bundle.get("signal_components", []))
+        raw_conf = float(ai_result["confidence"])
+        raw_conf += self.learning.signal_confidence_adjustment(signal_net)
+        ai_result["confidence"] = self.learning.calibrate_confidence(db, engine="ai", raw=raw_conf)
+
+        if signal_net >= 15 and ai_result["direction"] == "bearish":
+            ai_result["confidence"] = max(35, ai_result["confidence"] - 8)
+        elif signal_net <= -15 and ai_result["direction"] == "bullish":
+            ai_result["confidence"] = max(35, ai_result["confidence"] - 8)
         snapshot["analysis_factors"] = build_analysis_factors(
             snapshot, technicals, ai_result["direction"]
         )
@@ -119,12 +147,26 @@ class PredictionService:
 
         symbol = ticker.upper()
         technicals = await self.analysis.get_technicals(symbol)
+        try:
+            signal_bundle = await self.signals.bundle(symbol)
+        except Exception:
+            signal_bundle = {"signal_components": []}
+
         quote = await self.market.quote(symbol)
         company_name = quote.get("name", f"{symbol} Inc.")
         price = float(technicals["price"])
 
         direction = Direction(technicals["signal"])
-        confidence = float(technicals["technical_score"])
+        signal_net = sum(c.get("score", 0) for c in signal_bundle.get("signal_components", []))
+        confidence = float(technicals["technical_score"]) + self.learning.signal_confidence_adjustment(signal_net) * 0.5
+        confidence = self.learning.calibrate_confidence(db, engine="technical", raw=confidence)
+
+        if signal_net >= 12 and direction == Direction.bearish:
+            direction = Direction.bullish
+            confidence = max(35, confidence - 5)
+        elif signal_net <= -12 and direction == Direction.bullish:
+            direction = Direction.bearish
+            confidence = max(35, confidence - 5)
         move_pct = horizon_move_pct(horizon_minutes)
         target = round(price * (1 + move_pct), 2)
         stop = round(price * (1 - abs(move_pct) * 1.2), 2)
@@ -146,8 +188,12 @@ class PredictionService:
 
         snapshot = await self.market.build_analysis_snapshot(symbol)
         snapshot["technicals"] = technicals
+        snapshot["enhanced_signals"] = signal_bundle
         snapshot["horizon_minutes"] = horizon_minutes
         snapshot["horizon_label"] = horizon_label
+        snapshot["platform_learning"] = self.learning.build_learning_context(
+            db, ticker=symbol, horizon_label=horizon_label, engine="technical"
+        )
         snapshot["analysis_factors"] = build_analysis_factors(snapshot, technicals, direction.value)
         content_hash = snapshot_hash(
             snapshot, {"engine": "technical-bot", "direction": direction.value, "ts": datetime.utcnow().isoformat()}
@@ -325,8 +371,12 @@ class TrackerService:
                 return PredictionOutcome.correct
             if actual <= pred.stop_loss:
                 return PredictionOutcome.incorrect
-            if move_pct > 1.0:
-                return PredictionOutcome.partial if move_pct < 3 else PredictionOutcome.correct
+            if move_pct <= -0.5:
+                return PredictionOutcome.incorrect
+            if move_pct >= 3.0:
+                return PredictionOutcome.correct
+            if move_pct >= 1.0:
+                return PredictionOutcome.partial
             return PredictionOutcome.incorrect
 
         if pred.direction == Direction.bearish:
@@ -334,11 +384,14 @@ class TrackerService:
                 return PredictionOutcome.correct
             if actual >= pred.stop_loss:
                 return PredictionOutcome.incorrect
-            if move_pct < -1.0:
-                return PredictionOutcome.partial if move_pct > -3 else PredictionOutcome.correct
+            if move_pct >= 0.5:
+                return PredictionOutcome.incorrect
+            if move_pct <= -3.0:
+                return PredictionOutcome.correct
+            if move_pct <= -1.0:
+                return PredictionOutcome.partial
             return PredictionOutcome.incorrect
 
-        # neutral — within ±3% band
-        if abs(move_pct) <= 3:
+        if abs(move_pct) <= 2.5:
             return PredictionOutcome.correct
         return PredictionOutcome.incorrect

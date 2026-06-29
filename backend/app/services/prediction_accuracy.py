@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models import Prediction, PredictionOutcome
+from app.services.aggregate_learning import AggregateLearningService
 
 
 def _is_win(outcome: PredictionOutcome) -> bool:
@@ -114,9 +115,10 @@ class PredictionAccuracyService:
         ai_preds = [p for p in preds if _engine_label(p.ai_model) == "ai"]
         tech_preds = [p for p in preds if _engine_label(p.ai_model) == "technical"]
 
-        by_horizon: dict[str, dict] = {}
-        for h in (7, 30, 90):
-            by_horizon[str(h)] = bucket_stats([p for p in preds if p.horizon_days == h])
+        by_horizon: dict[str, dict] = AggregateLearningService().horizon_buckets(db, user_id)
+        if not by_horizon:
+            for h in (7, 30, 90):
+                by_horizon[str(h)] = bucket_stats([p for p in preds if p.horizon_days == h])
 
         by_direction: dict[str, float] = {"bullish": 0.0, "bearish": 0.0, "neutral": 0.0}
         dir_counts: dict[str, list[float]] = {"bullish": [], "bearish": [], "neutral": []}

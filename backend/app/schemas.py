@@ -570,11 +570,15 @@ class EventTraderResponse(BaseModel):
     proxy_wallet: str | None = None
     verified: bool = False
     x_username: str | None = None
+    is_active: bool = False
+    recent_live_trade: dict | None = None
 
 
 class EventTraderDetailResponse(EventTraderResponse):
     recent_activity: list[dict] = []
     closed_positions: list[dict] = []
+    live_trades: list[dict] = []
+    strategy: dict | None = None
 
 
 class EventMarketPredictionRequest(BaseModel):
