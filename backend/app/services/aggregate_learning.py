@@ -7,7 +7,7 @@ from collections import defaultdict
 from sqlalchemy.orm import Session
 
 from app.models import Prediction, PredictionOutcome, Direction
-from app.services.prediction_accuracy import _engine_label, _is_win
+from app.services.prediction_helpers import engine_label, is_win
 
 
 def _resolved_query(db: Session, *, ticker: str | None = None):
@@ -26,11 +26,11 @@ class AggregateLearningService:
         if not preds:
             return {"resolved": 0, "win_rate_pct": None, "ai_win_rate_pct": None, "technical_win_rate_pct": None}
 
-        wins = sum(1 for p in preds if _is_win(p.outcome))
-        ai = [p for p in preds if _engine_label(p.ai_model) == "ai"]
-        tech = [p for p in preds if _engine_label(p.ai_model) == "technical"]
-        ai_wins = sum(1 for p in ai if _is_win(p.outcome))
-        tech_wins = sum(1 for p in tech if _is_win(p.outcome))
+        wins = sum(1 for p in preds if is_win(p.outcome))
+        ai = [p for p in preds if engine_label(p.ai_model) == "ai"]
+        tech = [p for p in preds if engine_label(p.ai_model) == "technical"]
+        ai_wins = sum(1 for p in ai if is_win(p.outcome))
+        tech_wins = sum(1 for p in tech if is_win(p.outcome))
 
         return {
             "resolved": len(preds),
@@ -43,7 +43,7 @@ class AggregateLearningService:
         preds = _resolved_query(db, ticker=ticker).all()
         if not preds:
             return {"resolved": 0, "win_rate_pct": None}
-        wins = sum(1 for p in preds if _is_win(p.outcome))
+        wins = sum(1 for p in preds if is_win(p.outcome))
         return {"resolved": len(preds), "win_rate_pct": round(wins / len(preds) * 100, 1)}
 
     def horizon_stats(self, db: Session, horizon_label: str) -> dict:
@@ -56,7 +56,7 @@ class AggregateLearningService:
         ]
         if not matched:
             return {"resolved": 0, "win_rate_pct": None}
-        wins = sum(1 for p in matched if _is_win(p.outcome))
+        wins = sum(1 for p in matched if is_win(p.outcome))
         return {"resolved": len(matched), "win_rate_pct": round(wins / len(matched) * 100, 1)}
 
     def direction_stats(self, db: Session, direction: str) -> dict:
@@ -67,16 +67,16 @@ class AggregateLearningService:
         preds = _resolved_query(db).filter(Prediction.direction == dir_enum).all()
         if not preds:
             return {"resolved": 0, "win_rate_pct": None}
-        wins = sum(1 for p in preds if _is_win(p.outcome))
+        wins = sum(1 for p in preds if is_win(p.outcome))
         return {"resolved": len(preds), "win_rate_pct": round(wins / len(preds) * 100, 1)}
 
     def calibration_factor(self, db: Session, *, engine: str, confidence: float) -> float:
         """Scale raw confidence toward historical actual win rate in the same band."""
         preds = _resolved_query(db).all()
         if engine == "technical":
-            preds = [p for p in preds if _engine_label(p.ai_model) == "technical"]
+            preds = [p for p in preds if engine_label(p.ai_model) == "technical"]
         else:
-            preds = [p for p in preds if _engine_label(p.ai_model) == "ai"]
+            preds = [p for p in preds if engine_label(p.ai_model) == "ai"]
         if len(preds) < 8:
             return 1.0
 
@@ -87,7 +87,7 @@ class AggregateLearningService:
             group = [p for p in preds if lo <= p.confidence < hi]
             if len(group) < 5:
                 return 1.0
-            actual = sum(1 for p in group if _is_win(p.outcome)) / len(group)
+            actual = sum(1 for p in group if is_win(p.outcome)) / len(group)
             stated = sum(p.confidence for p in group) / len(group) / 100
             if stated <= 0.05:
                 return 1.0
@@ -171,7 +171,7 @@ class AggregateLearningService:
             buckets[label].append(p)
         out = {}
         for label, group in buckets.items():
-            wins = sum(1 for p in group if _is_win(p.outcome))
+            wins = sum(1 for p in group if is_win(p.outcome))
             out[label] = {
                 "resolved": len(group),
                 "win_rate_pct": round(wins / len(group) * 100, 1) if group else None,
